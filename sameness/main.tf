@@ -1,16 +1,13 @@
 variable "selector" {
   type = object({
-    zone = string
-    region = string
-    exclude_ids = list(string)
+    prefer_tags = list(string)
+    exclude_tags = list(string)
   })
 }
 
 variable "failovers" {
   type = list(object({
-    id = string
-    zone = string
-    region = string
+    tags = list(string)
     target = object({
       datacenter = optional(string, "")
       partition = optional(string, "")
@@ -34,40 +31,23 @@ output "prepared_query_failover" {
 }
 
 locals {
-  no_duplicates = distinct([
-    for v in var.failovers: v if (v.id == "" || !contains(var.selector.exclude_ids, v.id))
+  excluded = distinct([
+    for f in var.failovers:
+      f if length(setintersection(var.selector.exclude_tags, f.tags)) > 0
   ])
-
-  o1 = [
-    for v in local.no_duplicates: v if
-      var.selector.zone == v.zone &&
-      var.selector.region == v.region
-  ]
-  o2 = [
-    for v in local.no_duplicates: v if
-      var.selector.zone != v.zone &&
-      var.selector.region == v.region
-  ]
-  priorities = distinct(concat(local.o1, local.o2))
+  preferred = distinct(flatten([
+    for t in var.selector.prefer_tags: [
+      for f in var.failovers:
+        f
+        if contains(f.tags, t)
+        && !contains(local.excluded, f)
+    ]
+  ]))
   others = [
-    for v in local.no_duplicates: v if !contains(local.priorities, v)
+    for f in var.failovers:
+      f
+      if !contains(local.preferred, f)
+      && !contains(local.excluded, f)
   ]
-  output = concat(local.priorities, local.others)
+  output = concat(local.preferred, local.others)
 }
-
-
-      /*
-      # Replicate the Consul logic for inheriting default partition / dc / service info.
-      # This is used to prevent a service from selecting itself as a failover accidentally.
-      if var.this != {
-        zone = v.zone
-        region = v.region
-        target = {
-          datacenter = v.target.datacenter == "" ? var.this.target.datacenter : v.target.datacenter
-          partition = v.target.partition == "" ? var.this.target.partition : v.target.partition # TODO convert "default" to ""?
-          service = v.target.service == "" ? var.this.target.service : v.target.service
-          service_subset = v.target.service_subset == "" ? var.this.target.service_subset : v.target.service_subset
-          namespace = v.target.namespace == "" ? var.this.target.namespace: v.target.namespace
-        }
-      }
-      */
