@@ -31,10 +31,14 @@ output "prepared_query_failover" {
 }
 
 locals {
+
+  # Exclude an entry if any tags match.
   excluded = distinct([
     for f in var.failovers:
       f if length(setintersection(var.selector.exclude_tags, f.tags)) > 0
   ])
+
+  # Prefer tags in the order specified.
   preferred = distinct(flatten([
     for t in var.selector.prefer_tags: [
       for f in var.failovers:
